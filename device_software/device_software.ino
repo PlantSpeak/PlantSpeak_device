@@ -23,6 +23,22 @@ const char MQTT_TOPIC[] = "SmartPlant";
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
+
+  //////////////////
+ // LIGHT SENSOR //
+//////////////////
+uint16_t get_light_reading(){
+  return analogRead(PHOTORESISTOR_PIN);
+}
+
+// Converting analog signal from photoresistor to lux (unit for light intensity).
+// The following function converts voltage reading on the analog pin
+// (from the LDR) to lux. This was calibrated
+// by comparing voltage readings to lux readings from a smartphone sensor.
+float estimate_light_intensity(){
+  return 8715.57985748*exp(-0.00489288*get_light_reading());
+}
+
   //////////////////
  // NETWORK/WIFI //
 //////////////////
@@ -86,5 +102,6 @@ void loop() {
   }
   Serial.println(get_temperature());
   Serial.println(get_humidity());
+  Serial.println(estimate_light_intensity());
   delay(2000);
 } 
