@@ -18,11 +18,30 @@
 const int DEVICE_ID = 0;
 const char MQTT_TOPIC[] = "SmartPlant";
 
+#define INTERVAL 2000 //Time interval between readings from sensors in milliseconds.
+
 // Client objects for connecting to wifi and mqtt,
 // maintaining relevant data.
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
+
+  //////////
+ // TIME //
+//////////
+// Get current time from ntp server (internet).
+// Get current GMT.
+void timeserver_connect(){
+  const char* ntpServer = "pool.ntp.org";
+  configTime(0, 0, ntpServer);
+}
+
+struct tm getTime(){
+  struct tm current_time;
+  getLocalTime(&current_time);
+  Serial.println(&current_time, "%A, %B %d %Y %H:%M:%S");
+  return current_time;
+}
 
   ///////////////////
  // SOIL MOISTURE //
@@ -166,6 +185,50 @@ float get_humidity(){
   return dht11.getHumidity();
 }
 
+
+// Code for taking readings and packaging them for sending over MQTT to central server.
+struct Reading{
+  float temp;
+  float humidity;
+  float soil_moisture;
+  int moisture_index;
+  String moisture_level;
+  time_t timestamp;
+  float light_intensity;
+};
+
+String generateMessage(struct Reading reading){
+  char json_str[256];
+  sprintf(json_str, "{\n \"id\":%d\n \"temp\":%f\n \"humidity\":%f\n \"soil_moisture\":%f\n  \"moisture_index\":%d\n  \"moisture_level\":\"%s\"\n \"light_intensity\":%f\n  \"time\":%ld\n}", DEVICE_ID, reading.temp, reading.humidity, reading.soil_moisture, reading.moisture_index, reading.moisture_level.c_str(), reading.light_intensity, reading.timestamp);
+  return String(json_str);
+}
+
+String describe_soil_moisture(int soil_moisture_level){
+  switch(soil_moisture_level){
+    case DRY:
+      return "Dry";
+    case MOIST:
+      return "Moist";
+    case WET:
+      return "Wet";
+    default:
+      return "Unknown";
+  }
+}
+
+struct Reading takeReading(){
+  struct Reading reading;
+  reading.temp = get_temperature();
+  reading.humidity = get_humidity();
+  float soil_moisture = get_soil_moisture();
+  reading.soil_moisture = soil_moisture;//estimate_volumetric_soil_moisture(soil_moisture);
+  reading.moisture_index = estimate_moisture_index(soil_moisture);
+  reading.moisture_level = describe_soil_moisture(estimate_relative_moisture(soil_moisture));
+  reading.light_intensity = estimate_light_intensity();
+  reading.timestamp = time(NULL);
+  return reading;
+}
+
 // Startup code.
 void setup() { 
   // Uncomment the following line for serial output for debugging purposes.
@@ -175,20 +238,23 @@ void setup() {
   pinMode(PHOTORESISTOR_PIN, INPUT);
   pinMode(DHT11_PIN, INPUT);
   pinMode(SOIL_MOISTURE_SENSOR_PIN, INPUT);
+  setup_temp_sensor();
   
   connect();
+  timeserver_connect();
+  getTime();
 }
 
 void loop() {
+  struct Reading reading = takeReading();
+  //Serial.println(generateMessage(reading));
   
   if (!client.connected()) {
     connectToMQTT();
-    client.publish(MQTT_TOPIC, "test", true);
   }
-  Serial.println(get_temperature());
-  Serial.println(get_humidity());
-  Serial.println(estimate_light_intensity());
-  Serial.println(get_soil_moisture());
-  Serial.println(estimate_relative_moisture(get_soil_moisture()));
-  delay(2000);
+  
+  client.publish(MQTT_TOPIC, generateMessage(reading).c_str(), true);
+  
+
+  delay(INTERVAL);
 } 
