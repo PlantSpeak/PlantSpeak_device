@@ -24,6 +24,91 @@ WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
 
+  ///////////////////
+ // SOIL MOISTURE //
+///////////////////
+// Soil Moisture Sensor - Calibration
+//  ESP32 ADCs have a maximum resolution of 12 bits... so when calibrating
+//  the sensors expect a reading in the range 0-4096. Also note that sensor 
+//  sensitivity will vary from module to module.
+const int SOIL_MOISTURE_MIN = 1631; // Min reading when completely submerged in water.
+const int SOIL_MOISTURE_MAX = 2851; // Max reading in dry air.
+const int SOIL_MOISTURE_RANGE = SOIL_MOISTURE_MAX - SOIL_MOISTURE_MIN;
+
+
+// Estimating the volumetric soil moisture. This section uses estimates for the low-cost
+// V1.2 capacitive soil moisture sensor which does not have a datasheet readily available.
+// We are using similar methodologies to estimate of soil moisture found by Joshua Hrisko. His methodology is
+// described in the excellent article linked below.
+// Hrisko, J. (2020). Capacitive Soil Moisture Sensor Calibration with Arduino. Maker Portal.
+// https://makersportal.com/blog/2020/5/26/capacitive-soil-moisture-calibration-with-arduino
+//float slope = 2.48;
+
+float maxVoltage = 2.33; // in dry air
+float minVoltage = 1.20; //submerged in water
+float slope = 2.48;
+//float intercept = -0.72;
+float intercept = -1.07181;
+//float intercept = -0.92;
+//float adcMin = 0.15;
+//float adcMax = 3.15;
+float estimate_volumetric_soil_moisture(uint16_t reading){
+  float vin = 3.3;
+  //float vin = adcMax-adcMin;
+  int adcResolution = 12;
+  float voltage = (float(reading)/pow(2,adcResolution))*vin;
+  Serial.println(voltage);
+  return ((1.0/voltage)*slope)+intercept;
+}
+
+enum MOISTURE_LEVELS{
+  DRY=0,
+  MOIST,
+  WET
+};
+
+// Estimate soil moisture according to index on
+// store-bought soil moisture.
+int estimate_moisture_index(float vol_soil_moisture){
+  int index = floor(0.7034*exp(3.2585*vol_soil_moisture));
+  if(index<0)
+    index = 0;
+  else if(index > 10)
+    index = 10;
+  return index;
+}
+
+// Will estimate the relative moisture content of the soil.
+uint8_t calc_soil_moisture(uint16_t moisture){
+  if(moisture<SOIL_MOISTURE_MIN){
+    return 0;
+  } else if (moisture>SOIL_MOISTURE_MAX){
+    return 100;
+  } else {
+    return 100-float(moisture-SOIL_MOISTURE_MIN)/SOIL_MOISTURE_RANGE*100;
+  }
+}
+//2.6 max
+//1.78 min
+float get_soil_moisture(){
+  uint16_t reading = analogRead(SOIL_MOISTURE_SENSOR_PIN);
+  return estimate_volumetric_soil_moisture(reading);
+  //return calc_soil_moisture(reading);
+}
+
+
+int estimate_relative_moisture(float vol_soil_moisture){
+  int index = estimate_moisture_index(vol_soil_moisture);
+  switch(index){
+    case 0 ... 2:
+      return DRY;
+    case 3 ... 7:
+      return MOIST;
+    case 8 ... 10:
+      return WET;
+  }
+}
+
   //////////////////
  // LIGHT SENSOR //
 //////////////////
@@ -103,5 +188,7 @@ void loop() {
   Serial.println(get_temperature());
   Serial.println(get_humidity());
   Serial.println(estimate_light_intensity());
+  Serial.println(get_soil_moisture());
+  Serial.println(estimate_relative_moisture(get_soil_moisture()));
   delay(2000);
 } 
