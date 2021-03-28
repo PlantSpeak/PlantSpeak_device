@@ -255,5 +255,6 @@ void loop() {
   
   client.publish(MQTT_TOPIC, generateMessage(reading).c_str(), true);
   
+
   delay(INTERVAL);
 } 
