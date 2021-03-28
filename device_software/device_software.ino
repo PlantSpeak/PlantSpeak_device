@@ -64,6 +64,23 @@ void connect(){
   connectToMQTT();
 }
 
+  ////////////////////////////
+ // TEMPERATURE + HUMIDITY //
+////////////////////////////
+DHTesp dht11;
+// Prepares the dht sensor for use.
+void setup_temp_sensor(){
+  dht11.setup(DHT11_PIN, DHTesp::DHT11);
+}
+
+float get_temperature(){
+  return dht11.getTemperature();
+}
+
+float get_humidity(){
+  return dht11.getHumidity();
+}
+
 // Startup code.
 void setup() { 
   // Uncomment the following line for serial output for debugging purposes.
@@ -83,6 +100,8 @@ void loop() {
     connectToMQTT();
     client.publish(MQTT_TOPIC, "test", true);
   }
+  Serial.println(get_temperature());
+  Serial.println(get_humidity());
   Serial.println(estimate_light_intensity());
   delay(2000);
 } 
