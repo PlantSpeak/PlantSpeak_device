@@ -47,5 +47,3 @@ The device should now be sending pairing requests to the webapp so that it can b
 Place the soil moisture monitor in the plant as per the image.
 
 ![](setup.jpg)
-
-## Web Application
