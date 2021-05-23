@@ -1,5 +1,8 @@
-# PlantSpeak User Guide
-## Device
+
+# PlantSpeak_device
+This software can be uploaded to an ESP32-WROOM Development board to measure ambient temperature, humidity and light intensity as well as soil moisture, using  DHT11, photoresistor and Soil moisture sensor v1.2 module respectively.
+
+## Device User Guide
 ### Requirments
 #### Hardware
 The following components were used to build a prototype. Similar substittutes can be used in some instances although this may cause unexpected behaviour and/or may require code changes/calibration.
@@ -47,3 +50,4 @@ The device should now be sending pairing requests to the webapp so that it can b
 Place the soil moisture monitor in the plant as per the image.
 
 ![](setup.jpg)
+
