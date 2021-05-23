@@ -1,14 +1,19 @@
+#include <EEPROM.h>
 #include <DHTesp.h>
 #include <PubSubClient.h>
 #include "time.h"
 #include <WiFi.h>
 
-// ENTER YOUR DETAILS HERE
-#define WIFI_SSID "" //ENTER YOUR WIFI SSID HERE
-#define WIFI_PASSWORD "" //ENTER YOUR WIFI PASSWORD HERE
-#define MQTT_SERVER_ADDR "" //ENTER THE MQTT SERVER ADDRESS HERE
+// NETWORK CONNECTION DETAILS
+//// These must be filled in for program to compile and correctly for the device to function.
+#define WIFI_SSID //ENTER YOUR WIFI SSID HERE
+#define WIFI_PASSWORD //ENTER YOUR WIFI PASSWORD HERE
+#define MQTT_SERVER_ADDR //ENTER THE MQTT SERVER ADDRESS HERE
+#define MQTT_PORT 1883 //DEFAULT MQTT PORT 
 
-#define MQTT_PORT 1883 //DEFAULT MQTT PORT
+#define READING_DELAY 15000
+#define MQTT_CONNECTION_RETRY_DELAY 500
+#define WIFI_RECONNECT_DELAY 5000
 
 // Define input/output pins.
 #define PHOTORESISTOR_PIN 35
@@ -17,14 +22,37 @@
 
 const int DEVICE_ID = 0;
 const char MQTT_TOPIC[] = "SmartPlant";
+const char MQTT_TOPIC_Pairing[] = "SmartPlant_pairing";
 
-#define INTERVAL 2000 //Time interval between readings from sensors in milliseconds.
+bool connection_established = false;
 
-// Client objects for connecting to wifi and mqtt,
-// maintaining relevant data.
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
+  //////////////////
+ // NETWORK/WIFI //
+//////////////////
+// Routines for connect to network, and the internet, via WiFi.
+void connectToWifi(){
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(WIFI_RECONNECT_DELAY);
+  }
+}
+
+void connectToMQTT(){
+  client.setServer(MQTT_SERVER_ADDR, MQTT_PORT);
+  String clientId = "Plant";
+    clientId +=String(DEVICE_ID);
+    while (!client.connect(clientId.c_str())) {
+      delay(MQTT_CONNECTION_RETRY_DELAY);
+    }
+}
+
+void connect(){
+  connectToWifi();
+  connectToMQTT();
+}
 
   //////////
  // TIME //
@@ -39,7 +67,6 @@ void timeserver_connect(){
 struct tm getTime(){
   struct tm current_time;
   getLocalTime(&current_time);
-  Serial.println(&current_time, "%A, %B %d %Y %H:%M:%S");
   return current_time;
 }
 
@@ -69,14 +96,13 @@ float slope = 2.48;
 //float intercept = -0.72;
 float intercept = -1.07181;
 //float intercept = -0.92;
-//float adcMin = 0.15;
-//float adcMax = 3.15;
+float adcMin = 0.15;
+float adcMax = 3.15;
 float estimate_volumetric_soil_moisture(uint16_t reading){
   float vin = 3.3;
   //float vin = adcMax-adcMin;
   int adcResolution = 12;
   float voltage = (float(reading)/pow(2,adcResolution))*vin;
-  Serial.println(voltage);
   return ((1.0/voltage)*slope)+intercept;
 }
 
@@ -128,45 +154,16 @@ int estimate_relative_moisture(float vol_soil_moisture){
   }
 }
 
-  //////////////////
- // LIGHT SENSOR //
-//////////////////
-uint16_t get_light_reading(){
-  return analogRead(PHOTORESISTOR_PIN);
+/*
+float estimate_relative_moisture(float vol_soil_moisture){
+  if(vol_soil_moisture<0.425)
+    return DRY;
+  else if(vol_soil_moisture>=0.425 && vol_soil_moisture<0.7)
+    return DAMP;
+  else
+    return WET;
 }
-
-// Converting analog signal from photoresistor to lux (unit for light intensity).
-// The following function converts voltage reading on the analog pin
-// (from the LDR) to lux. This was calibrated
-// by comparing voltage readings to lux readings from a smartphone sensor.
-float estimate_light_intensity(){
-  return 8715.57985748*exp(-0.00489288*get_light_reading());
-}
-
-  //////////////////
- // NETWORK/WIFI //
-//////////////////
-// Routines for connect to network, and the internet, via WiFi.
-void connectToWifi(){
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(5000);
-  }
-}
-
-void connectToMQTT(){
-  client.setServer(MQTT_SERVER_ADDR, MQTT_PORT);
-  String clientId = "Plant";
-    clientId +=String(DEVICE_ID);
-    while (!client.connect(clientId.c_str())) {
-      delay(500);
-    }
-}
-
-void connect(){
-  connectToWifi();
-  connectToMQTT();
-}
+*/
 
   ////////////////////////////
  // TEMPERATURE + HUMIDITY //
@@ -185,8 +182,37 @@ float get_humidity(){
   return dht11.getHumidity();
 }
 
+  //////////////////
+ // LIGHT SENSOR //
+//////////////////
+uint16_t get_light_reading(){
+  return analogRead(PHOTORESISTOR_PIN);
+}
 
-// Code for taking readings and packaging them for sending over MQTT to central server.
+// Converting analog signal from photoresistor to lux (unit for light intensity).
+float estimate_light_intensity(){
+  return 8715.57985748*exp(-0.00489288*get_light_reading());
+}
+
+// Startup code.
+void setup() { 
+  // Setup pins.
+  pinMode(2, INPUT);
+  pinMode(4, INPUT);
+  pinMode(15, INPUT);
+//
+  // Setup sensors
+  setup_temp_sensor();
+  
+  connect();
+  timeserver_connect();
+  getTime();
+
+  if(EEPROM.read(0)==1)
+    connection_established = true;
+}
+
+// Data structure to contain the data taken from the sensors on the device.
 struct Reading{
   float temp;
   float humidity;
@@ -195,14 +221,17 @@ struct Reading{
   String moisture_level;
   time_t timestamp;
   float light_intensity;
+  char mac_address[20];
 };
 
+// Encodes reading data in JSON for sending over MQTT.
 String generateMessage(struct Reading reading){
   char json_str[256];
-  sprintf(json_str, "{\n \"id\":%d\n \"temp\":%f\n \"humidity\":%f\n \"soil_moisture\":%f\n  \"moisture_index\":%d\n  \"moisture_level\":\"%s\"\n \"light_intensity\":%f\n  \"time\":%ld\n}", DEVICE_ID, reading.temp, reading.humidity, reading.soil_moisture, reading.moisture_index, reading.moisture_level.c_str(), reading.light_intensity, reading.timestamp);
+  sprintf(json_str, "{\n \"id\":%d,\n \"temp\":%f,\n \"humidity\":%f,\n \"soil_moisture\":%f,\n  \"moisture_index\":%d,\n  \"moisture_level\":\"%s\",\n \"light_intensity\":%f,\n  \"time\":%ld,\n \"mac_address\":\"%s\"\n}", DEVICE_ID, reading.temp, reading.humidity, reading.soil_moisture, reading.moisture_index, reading.moisture_level.c_str(), reading.light_intensity, reading.timestamp, WiFi.macAddress().c_str());
   return String(json_str);
 }
 
+// Gives a description of the soil moisture based on volumetric soil moisuture %.
 String describe_soil_moisture(int soil_moisture_level){
   switch(soil_moisture_level){
     case DRY:
@@ -216,6 +245,7 @@ String describe_soil_moisture(int soil_moisture_level){
   }
 }
 
+// Get readings from sensors.
 struct Reading takeReading(){
   struct Reading reading;
   reading.temp = get_temperature();
@@ -229,31 +259,26 @@ struct Reading takeReading(){
   return reading;
 }
 
-// Startup code.
-void setup() { 
-  // Uncomment the following line for serial output for debugging purposes.
-  Serial.begin(9600);
-
-  // Setup pins.
-  pinMode(PHOTORESISTOR_PIN, INPUT);
-  pinMode(DHT11_PIN, INPUT);
-  pinMode(SOIL_MOISTURE_SENSOR_PIN, INPUT);
-  setup_temp_sensor();
-  
-  connect();
-  timeserver_connect();
-  getTime();
+// Record the message received on the pairing channel (confirms if connection successful).
+void mqtt_callback(char* topic, byte* payload, unsigned int length){
+  char str_received[length+1];
+  for(int i=0; i<length; i++){
+    str_received[i] = (char)payload[i];
+  }
+  str_received[length] = '\0';
+  if(strcmp(str_received,WiFi.macAddress().c_str())==0)
+    connection_established = true;
+    EEPROM.write(0, 1);
 }
 
-void loop() {
+void loop() {  
   struct Reading reading = takeReading();
-  //Serial.println(generateMessage(reading));
   
   if (!client.connected()) {
     connectToMQTT();
   }
-  
+  client.publish(MQTT_TOPIC_Pairing, WiFi.macAddress().c_str(), true);
   client.publish(MQTT_TOPIC, generateMessage(reading).c_str(), true);
-  
-  delay(INTERVAL);
+  // Delay between readings.
+  delay(READING_DELAY);
 } 
