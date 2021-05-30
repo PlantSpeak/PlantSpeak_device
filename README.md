@@ -10,7 +10,7 @@ The following components were used to build a prototype. Similar substittutes ca
 - ESP32-WROOM Development Board
 - KY-018 Photoresistor breakout board (photoresistor with auxilary circuitry incl. pull-up resistor)
 - DHT11 Temperature and Soil Moisture Sensor
-- Soil Moisture Sensor V2 (Generic)
+- Soil Moisture Sensor V1.2 (Generic)
 
 The components should be arranged per the following diagram and schematic.
 
